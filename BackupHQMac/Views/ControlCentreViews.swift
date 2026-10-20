@@ -361,9 +361,24 @@ struct FolderCard: View {
     var onEdit: () -> Void
     @State private var editingIgnores = false
 
+    /// True when a local place sits on the same volume as this folder.
+    private func sameDisk(_ t: Location) -> Bool {
+        guard t.kind == .local, location.kind == .local || location.kind == .source else { return false }
+        if let a = location.volumeUUID, let b = t.volumeUUID, !a.isEmpty, !b.isEmpty { return a.caseInsensitiveCompare(b) == .orderedSame }
+        func volume(_ path: String?) -> String? {
+            guard let path else { return nil }
+            let parts = path.split(separator: "/", omittingEmptySubsequences: true)
+            return parts.count >= 2 && parts[0] == "Volumes" ? String(parts[1]) : "/"
+        }
+        return volume(location.rootPath) == volume(t.rootPath)
+    }
+
+
     var body: some View {
         let f = coverage
-        let others = targets.filter { $0.id != location.id }
+        // A copy on the folder's own disk is not a backup, so places on the same volume are not offered
+        // (one already ticked stays visible, flagged, so it can be unticked).
+        let others = targets.filter { $0.id != location.id && (!sameDisk($0) || location.targets.contains($0.id)) }
         HStack(alignment: .center, spacing: 14) {
             Image(systemName: location.icon).font(.title2).frame(width: 30).foregroundStyle((f?.reachable ?? true) ? Color.accentColor : .secondary)
             VStack(alignment: .leading, spacing: 3) {
@@ -396,6 +411,7 @@ struct FolderCard: View {
                         Toggle(isOn: Binding(get: { on }, set: { v in Task { await model.setTarget(t, on: location, enabled: v) } })) {
                             Label(t.name, systemImage: t.placeKind.icon).lineLimit(1)
                         }.toggleStyle(.checkbox)
+                        if sameDisk(t) { Pill(text: "same disk — not a backup", color: .orange) }
                         if on && t.kind == .s3 {
                             Picker("", selection: Binding(get: { location.storageClass(for: t) }, set: { c in Task { await model.setStorageClass(t, on: location, storageClass: c) } })) {
                                 ForEach(S3StorageClass.allCases, id: \.self) { Text($0.shortName).tag($0) }
