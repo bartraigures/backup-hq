@@ -56,20 +56,22 @@ struct StatusBanner: View {
         let offline = s.places.filter { !$0.reachable }.map(\.name)
         let critical = s.alerts.contains { $0.severity == .critical && $0.acknowledgedAt == nil }
         let (icon, colour, title, detail) = line(folders: folders, gap: gap, queued: queued, critical: critical, running: s.engineRunning)
+        // Three text lines and a button slot, always the same size, so the banner never changes height.
         HStack(spacing: 14) {
-            Image(systemName: icon).font(.system(size: 34)).foregroundStyle(colour)
+            Image(systemName: icon).font(.system(size: 34)).foregroundStyle(colour).frame(width: 44, height: 44)
             VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.title2).bold()
-                Text(detail).font(.callout).foregroundStyle(.secondary)
-                if !offline.isEmpty { Text("\(offline.joined(separator: ", ")) \(offline.count == 1 ? "is" : "are") not plugged in right now. Nothing is wrong; copies there were made already.").font(.caption).foregroundStyle(.secondary) }
+                Text(title).font(.title2).bold().lineLimit(1)
+                Text(detail).font(.callout).foregroundStyle(.secondary).lineLimit(1)
+                Text(offline.isEmpty ? " " : "\(offline.joined(separator: ", ")) \(offline.count == 1 ? "is" : "are") not plugged in right now. Nothing is wrong; copies there were made already.")
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
-            Spacer()
-            if gap > 0 && !s.engineRunning {
-                Button("Start copying") { Task { await model.toggleEngine() } }.buttonStyle(.borderedProminent).tint(.green)
-            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Button("Start copying") { Task { await model.toggleEngine() } }.buttonStyle(.borderedProminent).tint(.green)
+                .opacity(gap > 0 && !s.engineRunning ? 1 : 0).disabled(!(gap > 0 && !s.engineRunning))
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: 96)
         .background(colour.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(colour.opacity(0.35)))
     }

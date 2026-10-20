@@ -159,41 +159,65 @@ struct Treemap: View {
 struct AlertsPanel: View {
     @Environment(AppModel.self) private var model
     @State private var showAcknowledged = false
+    private let rowHeight: CGFloat = 58
+    private let visibleRows = 3
 
     var body: some View {
-        let alerts = model.stats.alerts.filter { showAcknowledged || $0.acknowledgedAt == nil }
-        if !model.stats.alerts.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("Needs attention").font(.headline)
-                    Spacer()
-                    if model.stats.alerts.contains(where: { $0.acknowledgedAt != nil }) {
-                        Toggle("Show acknowledged", isOn: $showAcknowledged).toggleStyle(.checkbox).font(.caption)
-                    }
-                }
-                if alerts.isEmpty { Text("All acknowledged.").font(.caption).foregroundStyle(.secondary) }
-                ForEach(alerts) { a in
-                    HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: a.severity == .critical ? "exclamationmark.octagon.fill" : (a.severity == .warning ? "exclamationmark.triangle.fill" : "info.circle.fill"))
-                            .foregroundStyle(a.severity == .critical ? .red : (a.severity == .warning ? .orange : .blue))
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(a.title).bold()
-                            Text(a.detail).font(.caption).foregroundStyle(.secondary)
-                            Text("since \(a.firstSeen.formatted(.relative(presentation: .named)))").font(.caption2).foregroundStyle(.tertiary)
+        let all = model.stats.alerts
+        let alerts = all.filter { showAcknowledged || $0.acknowledgedAt == nil }
+        let acknowledged = all.filter { $0.acknowledgedAt != nil }.count
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Needs attention").font(.headline)
+                Text(alerts.isEmpty ? " " : "\(alerts.count)").font(.caption).monospacedDigit().foregroundStyle(.secondary).frame(width: 30, alignment: .leading)
+                Spacer()
+                Toggle("Show acknowledged (\(acknowledged))", isOn: $showAcknowledged).toggleStyle(.checkbox).font(.caption).disabled(acknowledged == 0)
+            }
+            .frame(height: 20)
+            // Always the height of three rows: fewer alerts leave blank space, more scroll inside it.
+            ScrollView(.vertical) {
+                VStack(spacing: 6) {
+                    ForEach(alerts) { a in row(a) }
+                    if alerts.isEmpty {
+                        HStack(spacing: 10) {
+                            Image(systemName: "checkmark.circle").foregroundStyle(.green)
+                            Text(all.isEmpty ? "Nothing needs attention." : "All acknowledged.").foregroundStyle(.secondary)
+                            Spacer()
                         }
-                        Spacer()
-                        if a.acknowledgedAt == nil { Button("Acknowledge") { Task { await model.acknowledge(a) } }.controlSize(.small) }
-                        else { Text("acknowledged").font(.caption2).foregroundStyle(.tertiary) }
+                        .padding(10).frame(height: rowHeight)
                     }
-                    .padding(10)
-                    .background((a.severity == .critical ? Color.red : (a.severity == .warning ? Color.orange : Color.blue)).opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
                 }
             }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary))
+            .frame(height: rowHeight * CGFloat(visibleRows) + 6 * CGFloat(visibleRows - 1))
         }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary))
+    }
+
+    private func row(_ a: BackupHQCore.Alert) -> some View {
+        let colour: Color = a.severity == .critical ? .red : (a.severity == .warning ? .orange : .blue)
+        return HStack(alignment: .center, spacing: 10) {
+            Image(systemName: a.severity == .critical ? "exclamationmark.octagon.fill" : (a.severity == .warning ? "exclamationmark.triangle.fill" : "info.circle.fill"))
+                .foregroundStyle(colour).frame(width: 18)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(a.title).bold().lineLimit(1)
+                Text(a.detail).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+            }
+            .help(a.detail)
+            Spacer(minLength: 8)
+            Text("since \(a.firstSeen.formatted(.relative(presentation: .named)))").font(.caption2).foregroundStyle(.tertiary).lineLimit(1).frame(width: 120, alignment: .trailing)
+            Group {
+                if a.acknowledgedAt == nil { Button("Acknowledge") { Task { await model.acknowledge(a) } }.controlSize(.small) }
+                else { Text("acknowledged").font(.caption2).foregroundStyle(.tertiary) }
+            }
+            .frame(width: 100, alignment: .trailing)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: rowHeight)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(colour.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
     }
 }
 
