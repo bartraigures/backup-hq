@@ -9,6 +9,7 @@ struct Legend: View {
         HStack(spacing: 14) {
             LegendSwatch(color: .green, text: "Safe")
             LegendSwatch(color: .green.opacity(0.6), text: "Copies on the way")
+            LegendSwatch(color: .orange, text: "Being fingerprinted")
             LegendSwatch(color: .red, text: "Missing a copy")
             LegendSwatch(color: .gray, text: "No backup by choice")
             LegendSwatch(color: .gray.opacity(0.4), text: "Disk not plugged in")
@@ -113,7 +114,7 @@ struct Treemap: View {
     }
 
     private func color(for f: FolderCoverage) -> Color {
-        switch f.safety { case .complete: return .green; case .queued: return .green.opacity(0.75); case .belowPolicy: return .red; case .singleByChoice: return .gray; case .offline: return .gray.opacity(0.6) }
+        switch f.safety { case .complete: return .green; case .queued: return .green.opacity(0.75); case .sweeping: return .orange; case .belowPolicy: return .red; case .singleByChoice: return .gray; case .offline: return .gray.opacity(0.6) }
     }
 
     struct Placed { var item: TreemapItem; var rect: CGRect }

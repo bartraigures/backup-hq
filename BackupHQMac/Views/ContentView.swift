@@ -201,12 +201,12 @@ extension PlaceKind {
 
 /// Safety status of a folder against its own targets.
 enum FolderSafety {
-    case complete, queued, belowPolicy, singleByChoice, offline
+    case complete, queued, sweeping, belowPolicy, singleByChoice, offline
     var color: Color {
-        switch self { case .complete: return .green; case .queued: return .green; case .belowPolicy: return .red; case .singleByChoice: return .gray; case .offline: return .gray }
+        switch self { case .complete: return .green; case .queued: return .green; case .sweeping: return .orange; case .belowPolicy: return .red; case .singleByChoice: return .gray; case .offline: return .gray }
     }
     var word: String {
-        switch self { case .complete: return "safe"; case .queued: return "copies on the way"; case .belowPolicy: return "missing a copy"; case .singleByChoice: return "no backup by choice"; case .offline: return "disk not plugged in" }
+        switch self { case .complete: return "safe"; case .queued: return "copies on the way"; case .sweeping: return "being fingerprinted"; case .belowPolicy: return "missing a copy"; case .singleByChoice: return "no backup by choice"; case .offline: return "disk not plugged in" }
     }
 }
 
@@ -215,6 +215,8 @@ extension FolderCoverage {
         if !reachable { return .offline }
         if targets.isEmpty { return .singleByChoice }
         if vulnerableCount == 0 { return .complete }
+        // Still being fingerprinted: copies are queued when the sweep ends, so this is progress, not a gap.
+        if activity.contains(where: { $0.kind == "hash" && $0.count > 0 }) { return .sweeping }
         // Vulnerable but every gap already has a job queued → queued.
         let allQueued = targets.allSatisfy { t in (fileCount - t.coveredCount) <= t.pendingCount }
         return allQueued ? .queued : .belowPolicy
