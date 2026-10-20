@@ -776,12 +776,49 @@ public actor Database {
         return conn.lastInsertRowID
     }
 
-    /// Atomically claims up to `limit` pending jobs of a kind, marking them running.
+    /// Round-robin state per job kind: where the rotation got to, and the list of waiting queues (refreshed every few
+    /// seconds — grouping a queue of hundreds of thousands of jobs costs ~0.2 s, far too much to do on every claim).
+    private struct ClaimQueue { var source: Int64?; var target: Int64?; var priority: Int64 }
+    private var claimCursor: [String: Int] = [:]
+    private var claimQueues: [String: (at: Date, queues: [ClaimQueue])] = [:]
+    /// Drops the cached queue list so the next claim looks again (tests; also harmless to call after a big enqueue).
+    public func forgetClaimCache() { claimQueues.removeAll() }
+
+    /// Atomically claims up to `limit` pending jobs of a kind, marking them running. Work is shared fairly between
+    /// queues (one queue per folder → place pair at the highest waiting priority), so a small folder's few new files
+    /// are not stuck behind a bulk copy of a huge one.
     public func claimJobs(kind: JobKind, limit: Int) throws -> [Job] {
         try conn.transaction {
-            let rows = try conn.query("SELECT * FROM jobs WHERE kind=? AND state='pending' AND (not_before IS NULL OR not_before <= ?) ORDER BY priority DESC, id LIMIT ?", [.text(kind.rawValue), .init(Date()), .integer(Int64(limit))])
-            var jobs: [Job] = []
             let now = Date()
+            let ready = "kind=? AND state='pending' AND (not_before IS NULL OR not_before <= ?)"
+            var queues: [ClaimQueue]
+            if let c = claimQueues[kind.rawValue], now.timeIntervalSince(c.at) < 5 {
+                queues = c.queues
+            } else {
+                queues = try conn.query("SELECT source_location_id AS s, target_location_id AS t, max(priority) AS p FROM jobs WHERE \(ready) GROUP BY 1, 2", [.text(kind.rawValue), .init(now)])
+                    .map { ClaimQueue(source: $0.int("s"), target: $0.int("t"), priority: $0.int("p") ?? 0) }
+                claimQueues[kind.rawValue] = (now, queues)
+            }
+            var rows: [SQLiteConnection.Row] = []
+            if queues.count <= 1 {
+                rows = try conn.query("SELECT * FROM jobs WHERE \(ready) ORDER BY priority DESC, id LIMIT ?", [.text(kind.rawValue), .init(now), .integer(Int64(limit))])
+            } else {
+                let top = queues.map(\.priority).max() ?? 0
+                var eligible = queues.filter { $0.priority == top }
+                var cursor = claimCursor[kind.rawValue] ?? 0
+                var taken: [Int64] = []
+                // Each turn either claims a row (bounded by limit) or drops a drained queue, so this ends.
+                while rows.count < limit, !eligible.isEmpty {
+                    let i = cursor % eligible.count; let q = eligible[i]; cursor += 1
+                    let exclude = taken.isEmpty ? "0" : taken.map(String.init).joined(separator: ",")
+                    let r = try conn.query("SELECT * FROM jobs WHERE \(ready) AND priority=? AND source_location_id IS ? AND target_location_id IS ? AND id NOT IN (\(exclude)) ORDER BY id LIMIT 1",
+                                           [.text(kind.rawValue), .init(now), .integer(top), .init(q.source), .init(q.target)])
+                    if let row = r.first, let id = row.int("id") { rows.append(row); taken.append(id) }
+                    else { eligible.remove(at: i); claimQueues[kind.rawValue] = nil }   // queue drained: forget the cached list
+                }
+                claimCursor[kind.rawValue] = cursor
+            }
+            var jobs: [Job] = []
             for r in rows {
                 var j = Self.job(from: r)
                 try conn.run("UPDATE jobs SET state='running', started=?, updated=?, attempts=attempts+1 WHERE id=?", [.init(now), .init(now), .integer(j.id)])
@@ -1081,6 +1118,13 @@ public actor Database {
                     SELECT count(*) AS n, COALESCE(sum(size),0) AS b FROM copies c WHERE c.location_id=? AND c.status='verified'
                       AND EXISTS (SELECT 1 FROM copies t WHERE t.sha256=c.sha256 AND t.location_id=? AND t.status='verified')
                     """, [.integer(owner.id), .integer(t.id)]).first { tc.coveredCount = Int(r.int("n") ?? 0); tc.coveredBytes = r.int("b") ?? 0 }
+                // Files not yet at the target but with a copy on the way. Counted by content, whichever folder queued the
+                // job: a file inside two tracked folders (one nested in the other) is delivered by a single job.
+                if let r = try conn.query("""
+                    SELECT count(*) AS n, COALESCE(sum(size),0) AS b FROM copies c WHERE c.location_id=? AND c.status='verified'
+                      AND NOT EXISTS (SELECT 1 FROM copies t WHERE t.sha256=c.sha256 AND t.location_id=? AND t.status='verified')
+                      AND EXISTS (SELECT 1 FROM jobs j WHERE j.sha256=c.sha256 AND j.target_location_id=? AND j.kind IN ('backup','upload','import') AND j.state IN ('pending','running','paused'))
+                    """, [.integer(owner.id), .integer(t.id), .integer(t.id)]).first { tc.pendingCount = Int(r.int("n") ?? 0); tc.pendingBytes = r.int("b") ?? 0 }
                 fc.targets.append(tc)
             }
             if targets.count == 1, let only = fc.targets.first {
@@ -1108,10 +1152,6 @@ public actor Database {
             if let owner = locs.first(where: { $0.id == ownerId }) { folders[i].reachable = owner.isReachable; folders[i].lastScanned = try lastScanned(locationId: ownerId) }
             for j in folders[i].targets.indices {
                 let tid = folders[i].targets[j].id
-                if let r = try conn.query("""
-                    SELECT count(*) AS n, COALESCE(sum(max(0, bytes_total-bytes_done)),0) AS b FROM jobs
-                    WHERE source_location_id=? AND target_location_id=? AND kind IN ('backup','upload') AND state IN ('pending','running','paused')
-                    """, [.integer(ownerId), .integer(tid)]).first { folders[i].targets[j].pendingCount = Int(r.int("n") ?? 0); folders[i].targets[j].pendingBytes = r.int("b") ?? 0 }
                 if let t = locs.first(where: { $0.id == tid }) { folders[i].targets[j].reachable = t.isReachable }
             }
             folders[i].activity = []

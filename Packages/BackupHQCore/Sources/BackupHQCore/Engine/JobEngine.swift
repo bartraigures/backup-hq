@@ -216,6 +216,15 @@ public actor JobEngine {
             try? await db.finishJob(id: job.id, state: .done, error: e.errorDescription)
         } catch let e as EngineError where { if case .sourceMissing = e { return true } else { return false } }() {
             await settleVanishedSource(job)
+        } catch let e as EngineError where { if case .noLocalCopy = e { return true } else { return false } }() {
+            // The catalogue no longer lists this content in the folder: the file was edited or removed after the copy was
+            // queued. The current version has its own fingerprint and copy jobs, so there is nothing left to do here —
+            // unless the folder's disk is simply unplugged, in which case wait for it.
+            if let sid = job.sourceLocationId, let loc = try? await db.location(id: sid), loc.kind != .s3, loc.kind != .adobe, !loc.isReachable {
+                try? await db.finishJob(id: job.id, state: .pending, error: "Waiting for \(loc.name) to be plugged in", notBefore: Date().addingTimeInterval(600))
+            } else {
+                try? await db.finishJob(id: job.id, state: .done, error: "Skipped — the file changed before it could be copied; the current version is copied separately")
+            }
         } catch let e as EngineError where { if case .notReachable = e { return true } else { return false } }() {
             // A disk that is not plugged in is not a failure: wait for it (a mount tries everything waiting again at once).
             try? await db.finishJob(id: job.id, state: .pending, error: e.errorDescription, notBefore: Date().addingTimeInterval(600))
