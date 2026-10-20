@@ -1,0 +1,14 @@
+# Default identity: signed to run locally, generic bundle ids. Override in project.local.yml (see project.local.example.yml).
+targets:
+  BackupHQ:
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.backuphq.mac
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Automatic
+  BackupHQiOS:
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.backuphq.ios
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Automatic

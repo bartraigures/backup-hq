@@ -1,0 +1,26 @@
+.DS_Store
+*.xcodeproj
+xcuserdata/
+.build/
+DerivedData/
+*.xcuserstate
+.swiftpm/
+
+# Personal: signing identity and bundle ids live here, never in project.yml
+project.local.yml
+
+# Personal data and working notes (file inventories, hashes, plans with account details, UI mockups with real screenshots)
+analysis/
+Mockup/
+PLAN.md
+*.tsv
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# Credentials must never be committed in any form
+*.pem
+*.p12
+.env
+.aws/
+credentials

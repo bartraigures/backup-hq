@@ -1,0 +1,23 @@
+  BackupHQiOS:
+    type: application
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: BackupHQiOS
+        excludes:
+          - "Resources/Info.plist"
+    dependencies:
+      - package: BackupHQCore
+    settings:
+      base:
+        INFOPLIST_FILE: BackupHQiOS/Resources/Info.plist
+        SWIFT_VERSION: "5.0"
+        PRODUCT_NAME: "Backup HQ"
+        PRODUCT_BUNDLE_IDENTIFIER: com.backuphq.ios
+        MARKETING_VERSION: "0.1.0"
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "-"
+        SWIFT_STRICT_CONCURRENCY: minimal
+        GENERATE_INFOPLIST_FILE: false
+        TARGETED_DEVICE_FAMILY: "1"
+        SUPPORTED_PLATFORMS: "iphoneos iphonesimulator"

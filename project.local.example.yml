@@ -1,0 +1,18 @@
+# Local overrides for signing and bundle ids. See project.local.example.yml. Git-ignored.
+{}
+
+# To sign with your own Apple team instead of "sign to run locally", replace the {} above with:
+#
+# targets:
+#   BackupHQ:
+#     settings:
+#       base:
+#         PRODUCT_BUNDLE_IDENTIFIER: com.yourname.backuphq
+#         CODE_SIGN_IDENTITY: "Apple Development"
+#         DEVELOPMENT_TEAM: YOURTEAMID
+#         CODE_SIGN_STYLE: Automatic
+#   BackupHQiOS:
+#     settings:
+#       base:
+#         PRODUCT_BUNDLE_IDENTIFIER: com.yourname.backuphq.ios
+#         DEVELOPMENT_TEAM: YOURTEAMID

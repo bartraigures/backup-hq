@@ -1,0 +1,16 @@
+{
+  "Rules": [
+    {
+      "ID": "abort-unfinished-multipart-uploads",
+      "Status": "Enabled",
+      "Filter": {},
+      "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 7 }
+    },
+    {
+      "ID": "expire-old-versions-after-a-year",
+      "Status": "Enabled",
+      "Filter": {},
+      "NoncurrentVersionExpiration": { "NoncurrentDays": 365 }
+    }
+  ]
+}

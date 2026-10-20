@@ -1,0 +1,53 @@
+name: BackupHQ
+options:
+  bundleIdPrefix: com.backuphq
+  deploymentTarget:
+    macOS: "15.0"
+  xcodeVersion: "26.0"
+  createIntermediateGroups: true
+# Signing and bundle ids come from signing.default.yml; project.local.yml (git-ignored) overrides it. Later includes win.
+include:
+  - path: signing.default.yml
+  - path: project.local.yml
+    optional: true
+packages:
+  BackupHQCore:
+    path: Packages/BackupHQCore
+targets:
+  BackupHQ:
+    type: application
+    platform: macOS
+    sources:
+      - path: BackupHQMac
+        excludes:
+          - "Resources/Info.plist"
+    dependencies:
+      - package: BackupHQCore
+    settings:
+      base:
+        INFOPLIST_FILE: BackupHQMac/Resources/Info.plist
+        CODE_SIGN_ENTITLEMENTS: BackupHQMac/Resources/BackupHQ.entitlements
+        SWIFT_VERSION: "5.0"
+        MARKETING_VERSION: "0.1.0"
+        ENABLE_HARDENED_RUNTIME: false
+        SWIFT_STRICT_CONCURRENCY: minimal
+        GENERATE_INFOPLIST_FILE: false
+  BackupHQiOS:
+    type: application
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: BackupHQiOS
+        excludes:
+          - "Resources/Info.plist"
+    dependencies:
+      - package: BackupHQCore
+    settings:
+      base:
+        INFOPLIST_FILE: BackupHQiOS/Resources/Info.plist
+        SWIFT_VERSION: "5.0"
+        PRODUCT_NAME: "Backup HQ"
+        MARKETING_VERSION: "0.1.0"
+        SWIFT_STRICT_CONCURRENCY: minimal
+        GENERATE_INFOPLIST_FILE: false
+        TARGETED_DEVICE_FAMILY: "1"
