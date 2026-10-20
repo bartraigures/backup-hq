@@ -55,7 +55,8 @@ struct StatusBanner: View {
         let queued = folders.reduce(0) { $0 + $1.queuedBytes }
         let offline = s.places.filter { !$0.reachable }.map(\.name)
         let critical = s.alerts.contains { $0.severity == .critical && $0.acknowledgedAt == nil }
-        let (icon, colour, title, detail) = line(folders: folders, gap: gap, queued: queued, critical: critical, running: s.engineRunning)
+        let sweeping = folders.flatMap(\.activity).filter { $0.kind == "hash" || $0.kind == "scan" }.reduce(Int64(0)) { $0 + max(0, $1.bytesTotal - $1.bytesDone) }
+        let (icon, colour, title, detail) = line(folders: folders, gap: gap, queued: queued, sweeping: sweeping, critical: critical, running: s.engineRunning)
         // Two lines and a button slot, always the same size, so the banner never changes height.
         HStack(spacing: 14) {
             // A small icon inside a shape, not a big icon on its own.
@@ -87,11 +88,12 @@ struct StatusBanner: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
-    private func line(folders: [FolderCoverage], gap: Int64, queued: Int64, critical: Bool, running: Bool) -> (String, Color, String, String) {
+    private func line(folders: [FolderCoverage], gap: Int64, queued: Int64, sweeping: Int64, critical: Bool, running: Bool) -> (String, Color, String, String) {
         let total = folders.reduce(0) { $0 + $1.bytes }
         let summary = "\(folders.count) folder\(folders.count == 1 ? "" : "s") · \(Format.bytes(total))"
         if critical { return ("exclamationmark.octagon.fill", .red, "Something needs your attention", "See the red item below.") }
         if folders.isEmpty { return ("folder.badge.plus", .secondary, "Nothing is tracked yet", "Go to Folders and pick a folder to look after.") }
+        if sweeping > 100_000_000 && running { return ("magnifyingglass", .orange, "Fingerprinting — \(Format.bytes(sweeping)) still to read", "Copies are queued once a folder's sweep is complete. \(summary) so far.") }
         if gap > 0 && !running { return ("exclamationmark.triangle.fill", .red, "\(Format.bytes(gap)) is only in one place", "Press Start copying and it goes where you asked. \(summary).") }
         if gap + queued > 0 { return ("arrow.triangle.2.circlepath", .orange, "Copying — \(Format.bytes(gap + queued)) still to go", "Everything else is where you said it should be. \(summary).") }
         let chosen = folders.filter { $0.safety == .singleByChoice }

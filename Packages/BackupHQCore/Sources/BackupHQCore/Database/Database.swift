@@ -482,6 +482,11 @@ public actor Database {
         try conn.run("DELETE FROM seen_files WHERE location_id=? AND path=?", [.integer(locationId), .text(path)])
     }
 
+    /// Fingerprint jobs still outstanding for a folder, not counting the one asking.
+    public func outstandingHashCount(locationId: Int64, excluding jobId: Int64) throws -> Int {
+        Int(try conn.scalarInt("SELECT count(*) FROM jobs WHERE kind='hash' AND state IN ('pending','running','paused') AND source_location_id=? AND id<>?", [.integer(locationId), .integer(jobId)]))
+    }
+
     /// Absolute paths of files in a location still waiting to be fingerprinted.
     public func outstandingHashPaths(locationId: Int64) throws -> Set<String> {
         var out = Set<String>()

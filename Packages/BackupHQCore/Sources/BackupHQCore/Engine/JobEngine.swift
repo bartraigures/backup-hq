@@ -636,7 +636,12 @@ public actor JobEngine {
             if live == nil && cloud.isEmpty && (loc.role == .source || loc.role == .library) {
                 await db.log("notice", "\(url.lastPathComponent) is not in the Lightroom catalog (kept anyway)", sha256: sha, jobId: job.id)
             }
-            try await queueFollowUps(sha256: sha, size: size, sourceURL: url, sourceLocation: loc)
+            // Copies wait until the folder's sweep is complete: the last fingerprint to finish queues them all in one
+            // set-based pass, so the queue (and the "to copy" figure) reflects the whole folder, not the part seen so far.
+            if try await db.outstandingHashCount(locationId: locId, excluding: job.id) == 0 {
+                let n = try await queueFollowUpsForFolder(loc, root: root)
+                if n > 0 { await db.log("info", "Sweep of \(loc.name) complete; queued \(Format.count(n)) copies", jobId: job.id) }
+            }
         }
     }
 

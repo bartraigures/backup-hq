@@ -422,7 +422,10 @@ struct FolderCard: View {
                         Spacer()
                         if on, let tc, let f {
                             let gap = f.bytes - tc.coveredBytes - tc.pendingBytes
-                            if tc.coveredCount >= f.fileCount { Label("done", systemImage: "checkmark").foregroundStyle(.green).font(.caption) }
+                            if let sweep = f.activity.first(where: { $0.kind == "hash" }), sweep.count > 0 {
+                                Text("\(Format.bytes(sweep.bytesTotal - sweep.bytesDone)) still to fingerprint, then copies").font(.caption).foregroundStyle(.secondary)
+                            }
+                            else if tc.coveredCount >= f.fileCount { Label("done", systemImage: "checkmark").foregroundStyle(.green).font(.caption) }
                             else if gap > 0 && (model.stats.engineRunning || f.lastScanned == nil) { Text("\(Format.bytes(gap)) to copy").font(.caption).foregroundStyle(.secondary) }
                             else if gap > 0 { Text("\(Format.bytes(gap)) waiting — press Start").foregroundStyle(.red).font(.caption) }
                             else { Text("\(Format.bytes(tc.pendingBytes)) on the way").font(.caption).foregroundStyle(.secondary) }
