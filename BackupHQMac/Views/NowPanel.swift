@@ -52,11 +52,8 @@ struct NowPanel: View {
             Text(s.engineRunning && s.throughputBytesPerSecond > 0 ? "\(Format.bytes(Int64(s.throughputBytesPerSecond)))/s" : " ")
                 .monospacedDigit().foregroundStyle(.secondary).frame(width: 96, alignment: .trailing)
             // Start is the one action that matters when work is waiting, so only then does it get a filled button.
-            Group {
-                if s.engineRunning { Button("Pause") { Task { await model.toggleEngine() } }.buttonStyle(.bordered) }
-                else { Button("Start") { Task { await model.toggleEngine() } }.buttonStyle(.borderedProminent).tint(.green).disabled(s.jobsPending == 0) }
-            }
-            .frame(width: 76)
+            if s.engineRunning { Button("Pause") { Task { await model.toggleEngine() } }.buttonStyle(.bordered) }
+            else { Button("Start") { Task { await model.toggleEngine() } }.buttonStyle(.borderedProminent).tint(.green).disabled(s.jobsPending == 0) }
         }
         .frame(height: 28)
     }
@@ -84,13 +81,13 @@ struct NowPanel: View {
         let files = folders.reduce(0) { $0 + $1.fileCount }
         let last = folders.compactMap(\.lastScanned).max()
         let every = model.settings.scanEveryMinutes
-        var small = last.map { "last look \($0.formatted(.relative(presentation: .named)))" } ?? "not looked at yet"
+        var small = last.map { "looked \(Self.ago($0))" } ?? "not looked at yet"
         if let last, every > 0 {
             let next = last.addingTimeInterval(Double(every) * 60)
-            small += next > Date() ? " · next \(next.formatted(.relative(presentation: .named)))" : " · next look due"
+            small += next > Date() ? " · next in \(Self.inTime(next))" : " · next look due"
         }
         if model.settings.watchFolders && s.engineRunning { small += " · live" }
-        return tile("Watching", "\(folders.count) folder\(folders.count == 1 ? "" : "s") · \(Format.bytes(bytes))", "\(Format.count(files)) files · " + small, icon: "eye", tint: .green)
+        return tile("Watching", "\(folders.count) folder\(folders.count == 1 ? "" : "s") · \(Format.count(files)) files · \(Format.bytes(bytes))", small, icon: "eye", tint: .green)
     }
 
     private func tileQueue(_ s: CatalogStats) -> some View {
@@ -118,7 +115,7 @@ struct NowPanel: View {
             return "\(Format.count(r.count)) \(Self.pastLabel(k))"
         }
         let big = moved > 0 ? "\(Format.bytes(moved)) moved" : (parts.isEmpty ? "Nothing yet" : "\(Format.count(s.recentWork.reduce(0) { $0 + $1.count })) tasks")
-        return tile("Last 24 hours", big, parts.isEmpty ? "no work finished" : parts.joined(separator: " · "), icon: "clock.arrow.circlepath", tint: .blue)
+        return tile("Last 24 hours", big, parts.isEmpty ? "no work finished" : parts.prefix(2).joined(separator: " · "), icon: "clock.arrow.circlepath", tint: .blue)
     }
 
     private func tilePlaces(_ s: CatalogStats) -> some View {
@@ -177,6 +174,20 @@ struct NowPanel: View {
     }
 
     // MARK: Words
+
+    private static func ago(_ d: Date) -> String {
+        let secs = max(0, Int(Date().timeIntervalSince(d)))
+        if secs < 60 { return "just now" }
+        if secs < 3600 { return "\(secs / 60) min ago" }
+        if secs < 86400 { return "\(secs / 3600) h ago" }
+        return "\(secs / 86400) d ago"
+    }
+    private static func inTime(_ d: Date) -> String {
+        let secs = max(0, Int(d.timeIntervalSinceNow))
+        if secs < 60 { return "under a minute" }
+        if secs < 3600 { return "\(secs / 60) min" }
+        return "\(secs / 3600) h \((secs % 3600) / 60) min"
+    }
 
     private static let kindOrder = ["scan", "hash", "backup", "upload", "verify", "import", "reclass"]
     private static func shortLabel(_ k: String) -> String {
