@@ -203,6 +203,7 @@ public actor JobEngine {
             case .reclass: try await runReclass(job)
             }
             try await db.finishJob(id: job.id, state: .done)
+            if job.kind == .hash { await sweepCheck(job) }
         } catch is CancellationError {
             try? await db.finishJob(id: job.id, state: .pending)
         } catch let e as EngineError where { if case .cancelled = e { return true } else { return false } }() {
@@ -364,9 +365,11 @@ public actor JobEngine {
         }
 
         Log.engine.info("scan \(loc.name, privacy: .public): \(gone) gone at \(Date().timeIntervalSince(t0), format: .fixed(precision: 2))s")
-        // A full look also catches up on copies the folder's targets are missing, in one set-based pass.
+        // A full look also catches up on copies the folder's targets are missing, in one set-based pass. A quick look
+        // does the same when nothing is left to fingerprint, as a safety net for anything a sweep missed.
         var followUps = 0
-        if !journal { followUps = try await queueFollowUpsForFolder(loc, root: root) }
+        let sweepClear = try await db.outstandingHashCount(locationId: loc.id, excluding: 0) == 0
+        if !journal || sweepClear { followUps = try await queueFollowUpsForFolder(loc, root: root) }
         Log.engine.info("scan \(loc.name, privacy: .public): \(followUps) follow-ups at \(Date().timeIntervalSince(t0), format: .fixed(precision: 2))s")
 
         try await db.setScanCursor(locationId: locId, cursor: cursor, device: device)
@@ -645,12 +648,18 @@ public actor JobEngine {
             if live == nil && cloud.isEmpty && (loc.role == .source || loc.role == .library) {
                 await db.log("notice", "\(url.lastPathComponent) is not in the Lightroom catalog (kept anyway)", sha256: sha, jobId: job.id)
             }
-            // Copies wait until the folder's sweep is complete: the last fingerprint to finish queues them all in one
-            // set-based pass, so the queue (and the "to copy" figure) reflects the whole folder, not the part seen so far.
-            if try await db.outstandingHashCount(locationId: locId, excluding: job.id) == 0 {
-                let n = try await queueFollowUpsForFolder(loc, root: root)
-                if n > 0 { await db.log("info", "Sweep of \(loc.name) complete; queued \(Format.count(n)) copies", jobId: job.id) }
-            }
+        }
+    }
+
+    /// Copies wait until the folder's sweep is complete: the last fingerprint to finish queues them all in one set-based
+    /// pass, so the queue (and the "to copy" figure) reflects the whole folder, not the part seen so far. Runs after the
+    /// job is recorded as done: two fingerprints finishing together must not each see the other still running and both
+    /// stand aside. If both see the folder clear, the second pass simply finds nothing left to queue.
+    private func sweepCheck(_ job: Job) async {
+        guard let locId = job.sourceLocationId, let loc = try? await db.location(id: locId), let root = loc.reachableRootURL else { return }
+        guard (try? await db.outstandingHashCount(locationId: locId, excluding: 0)) == 0 else { return }
+        if let n = try? await queueFollowUpsForFolder(loc, root: root), n > 0 {
+            await db.log("info", "Sweep of \(loc.name) complete; queued \(Format.count(n)) copies", jobId: job.id)
         }
     }
 
