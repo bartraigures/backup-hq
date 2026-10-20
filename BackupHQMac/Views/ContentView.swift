@@ -120,9 +120,19 @@ struct StatTile: View {
         .padding(12)
         .frame(maxWidth: .infinity, minHeight: 84, alignment: .topLeading)
         .background(.background.secondary, in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.quaternary))
+        .shadow(color: .black.opacity(0.06), radius: 6, x: 0, y: 3)
     }
 }
+
+/// Card surface used across the app: background contrast and a soft offset shadow do the separating; no border.
+struct CardStyle: ViewModifier {
+    func body(content: Self.Content) -> some View {   // Self. because the catalogue model also has a type called Content
+        content
+            .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12))
+            .shadow(color: .black.opacity(0.06), radius: 6, x: 0, y: 3)
+    }
+}
+extension View { func card() -> some View { modifier(CardStyle()) } }
 
 struct SectionBox<Content: View>: View {
     var title: String
@@ -138,8 +148,7 @@ struct SectionBox<Content: View>: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary))
+        .card()
     }
 }
 

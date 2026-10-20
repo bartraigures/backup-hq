@@ -968,6 +968,10 @@ public actor Database {
             default: break
             }
         }
+        s.recentWork = try conn.query("SELECT kind, count(*) AS n, COALESCE(sum(bytes_total),0) AS b FROM jobs WHERE state='done' AND updated > ? AND error IS NULL GROUP BY kind",
+                                      [.init(Date().addingTimeInterval(-86400))]).map { CatalogStats.RecentWork(kind: $0.string("kind") ?? "", count: Int($0.int("n") ?? 0), bytes: $0.int("b") ?? 0) }
+        s.recentEvents = try conn.query("SELECT id, time, level, message FROM events WHERE message NOT LIKE 'Engine %' ORDER BY id DESC LIMIT 6").map {
+            CatalogStats.RecentEvent(id: $0.int("id") ?? 0, time: $0.date("time") ?? Date(), level: $0.string("level") ?? "", message: $0.string("message") ?? "") }
         s.bytesPendingUpload = try conn.scalarInt("SELECT COALESCE(sum(max(0, bytes_total-bytes_done)),0) FROM jobs WHERE kind='upload' AND state IN ('pending','running','paused')")
         s.bytesPendingImport = try conn.scalarInt("SELECT COALESCE(sum(max(0, bytes_total-bytes_done)),0) FROM jobs WHERE kind='import' AND state IN ('pending','running','paused')")
         s.bytesPendingBackup = try conn.scalarInt("SELECT COALESCE(sum(max(0, bytes_total-bytes_done)),0) FROM jobs WHERE kind='backup' AND state IN ('pending','running','paused')")

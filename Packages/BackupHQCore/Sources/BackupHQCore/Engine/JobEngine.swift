@@ -219,6 +219,11 @@ public actor JobEngine {
         } catch let e as EngineError where { if case .notReachable = e { return true } else { return false } }() {
             // A disk that is not plugged in is not a failure: wait for it (a mount tries everything waiting again at once).
             try? await db.finishJob(id: job.id, state: .pending, error: e.errorDescription, notBefore: Date().addingTimeInterval(600))
+        } catch let e as S3Error where Self.isContentRace(e) {
+            // The file was rewritten while it was being sent, so the body no longer matched the checksum in the header.
+            // Not a failure: wait for the folder to settle, then the next attempt re-checks the file and re-fingerprints it.
+            await db.log("notice", "\(job.displayName) changed while it was being uploaded; will try again once the folder settles", sha256: job.sha256, jobId: job.id)
+            try? await db.finishJob(id: job.id, state: .pending, error: "Changed while uploading; retrying", notBefore: Date().addingTimeInterval(Double(max(30, settings.settleSeconds))))
         } catch {
             let msg = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
             await db.log("error", "\(job.kind.rawValue) failed for \(job.displayName): \(msg)", sha256: job.sha256, jobId: job.id)
@@ -227,6 +232,12 @@ public actor JobEngine {
             try? await db.finishJob(id: job.id, state: state, error: msg)
             if state == .pending { try? await Task.sleep(nanoseconds: 2_000_000_000) }
         }
+    }
+
+    /// S3 rejected the body because it no longer matched the checksum we computed: the source changed under us.
+    private static func isContentRace(_ e: S3Error) -> Bool {
+        let m = (e.message ?? "") + (e.code ?? "")
+        return m.contains("XAmzContentSHA256Mismatch") || m.contains("BadDigest") || m.contains("InvalidDigest")
     }
 
     private func isTransient(_ error: Error) -> Bool {

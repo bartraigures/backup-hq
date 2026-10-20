@@ -238,6 +238,24 @@ public struct CatalogStats: Codable, Sendable, Equatable {
     /// What is happening right now: the running jobs and the queue by kind.
     public var running: [RunningJob] = []
     public var queue: [QueueLine] = []
+    /// What finished in the last 24 hours, per kind of job.
+    public struct RecentWork: Codable, Sendable, Equatable, Identifiable {
+        public var id: String { kind }
+        public var kind: String
+        public var count: Int
+        public var bytes: Int64
+        public init(kind: String, count: Int, bytes: Int64) { self.kind = kind; self.count = count; self.bytes = bytes }
+    }
+    public var recentWork: [RecentWork] = []
+    /// The last few log lines, for the Home page to show while nothing is running.
+    public struct RecentEvent: Codable, Sendable, Equatable, Identifiable {
+        public var id: Int64
+        public var time: Date
+        public var level: String
+        public var message: String
+        public init(id: Int64, time: Date, level: String, message: String) { self.id = id; self.time = time; self.level = level; self.message = message }
+    }
+    public var recentEvents: [RecentEvent] = []
     public var duplicateGroups: Int = 0
     public var duplicateExtraCount: Int = 0
     public var jobsPending: Int = 0

@@ -56,24 +56,35 @@ struct StatusBanner: View {
         let offline = s.places.filter { !$0.reachable }.map(\.name)
         let critical = s.alerts.contains { $0.severity == .critical && $0.acknowledgedAt == nil }
         let (icon, colour, title, detail) = line(folders: folders, gap: gap, queued: queued, critical: critical, running: s.engineRunning)
-        // Three text lines and a button slot, always the same size, so the banner never changes height.
+        // Two lines and a button slot, always the same size, so the banner never changes height.
         HStack(spacing: 14) {
-            Image(systemName: icon).font(.system(size: 34)).foregroundStyle(colour).frame(width: 44, height: 44)
+            // A small icon inside a shape, not a big icon on its own.
+            ZStack {
+                Circle().fill(colour.opacity(0.15))
+                Image(systemName: icon).font(.system(size: 18, weight: .semibold)).foregroundStyle(colour)
+            }
+            .frame(width: 40, height: 40)
             VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.title2).bold().lineLimit(1)
-                Text(detail).font(.callout).foregroundStyle(.secondary).lineLimit(1)
-                Text(offline.isEmpty ? " " : "\(offline.joined(separator: ", ")) \(offline.count == 1 ? "is" : "are") not plugged in right now. Nothing is wrong; copies there were made already.")
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                HStack(spacing: 8) {
+                    Text(title).font(.title2).bold().lineLimit(1)
+                    if !offline.isEmpty {
+                        Pill(text: "\(offline.joined(separator: ", ")) not plugged in", color: .secondary)
+                            .help("Nothing is wrong; copies there were made already.")
+                    }
+                }
+                // Secondary text takes the banner's own hue rather than grey, which reads muddy on a tint.
+                Text(detail).font(.callout).foregroundStyle(colour == .secondary ? Color.secondary : colour.mix(with: .primary, by: 0.45)).lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             Button("Start copying") { Task { await model.toggleEngine() } }.buttonStyle(.borderedProminent).tint(.green)
                 .opacity(gap > 0 && !s.engineRunning ? 1 : 0).disabled(!(gap > 0 && !s.engineRunning))
         }
-        .padding(16)
+        .padding(.horizontal, 16).padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(height: 96)
+        .frame(height: 72)
         .background(colour.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(colour.opacity(0.35)))
+        .overlay(alignment: .leading) { RoundedRectangle(cornerRadius: 2).fill(colour).frame(width: 4).padding(.vertical, 12) }
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     private func line(folders: [FolderCoverage], gap: Int64, queued: Int64, critical: Bool, running: Bool) -> (String, Color, String, String) {

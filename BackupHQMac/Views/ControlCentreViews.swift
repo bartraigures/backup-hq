@@ -174,26 +174,25 @@ struct AlertsPanel: View {
                 Toggle("Show acknowledged (\(acknowledged))", isOn: $showAcknowledged).toggleStyle(.checkbox).font(.caption).disabled(acknowledged == 0)
             }
             .frame(height: 20)
-            // Always the height of three rows: fewer alerts leave blank space, more scroll inside it.
-            ScrollView(.vertical) {
-                VStack(spacing: 6) {
-                    ForEach(alerts) { a in row(a) }
-                    if alerts.isEmpty {
-                        HStack(spacing: 10) {
-                            Image(systemName: "checkmark.circle").foregroundStyle(.green)
-                            Text(all.isEmpty ? "Nothing needs attention." : "All acknowledged.").foregroundStyle(.secondary)
-                            Spacer()
-                        }
-                        .padding(10).frame(height: rowHeight)
-                    }
+            // As tall as its rows up to three; beyond that it scrolls rather than growing. Alerts change rarely,
+            // so the box only resizes when something genuinely new needs looking at.
+            if alerts.isEmpty {
+                HStack(spacing: 10) {
+                    Image(systemName: "checkmark.circle").foregroundStyle(.green)
+                    Text(all.isEmpty ? "Nothing needs attention." : "All acknowledged.").foregroundStyle(.secondary)
+                    Spacer()
                 }
+                .frame(height: 24)
+            } else {
+                ScrollView(.vertical) {
+                    VStack(spacing: 6) { ForEach(alerts) { a in row(a) } }
+                }
+                .frame(height: rowHeight * CGFloat(min(alerts.count, visibleRows)) + 6 * CGFloat(max(0, min(alerts.count, visibleRows) - 1)))
             }
-            .frame(height: rowHeight * CGFloat(visibleRows) + 6 * CGFloat(visibleRows - 1))
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary))
+        .card()
     }
 
     private func row(_ a: BackupHQCore.Alert) -> some View {
@@ -203,13 +202,13 @@ struct AlertsPanel: View {
                 .foregroundStyle(colour).frame(width: 18)
             VStack(alignment: .leading, spacing: 2) {
                 Text(a.title).bold().lineLimit(1)
-                Text(a.detail).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+                Text(a.detail).font(.caption).foregroundStyle(colour.mix(with: .primary, by: 0.5)).lineLimit(1).truncationMode(.tail)
             }
             .help(a.detail)
             Spacer(minLength: 8)
             Text("since \(a.firstSeen.formatted(.relative(presentation: .named)))").font(.caption2).foregroundStyle(.tertiary).lineLimit(1).frame(width: 120, alignment: .trailing)
             Group {
-                if a.acknowledgedAt == nil { Button("Acknowledge") { Task { await model.acknowledge(a) } }.controlSize(.small) }
+                if a.acknowledgedAt == nil { Button("Acknowledge") { Task { await model.acknowledge(a) } }.buttonStyle(.borderless).controlSize(.small) }
                 else { Text("acknowledged").font(.caption2).foregroundStyle(.tertiary) }
             }
             .frame(width: 100, alignment: .trailing)
@@ -431,7 +430,8 @@ struct FolderCard: View {
         .sheet(isPresented: $editingIgnores) { IgnoreRulesSheet(location: location) }
         .padding(12)
         .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(highlighted ? Color.accentColor : Color(nsColor: .quaternaryLabelColor), lineWidth: highlighted ? 2 : 1))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.accentColor, lineWidth: 2).opacity(highlighted ? 1 : 0))
+        .shadow(color: .black.opacity(0.06), radius: 6, x: 0, y: 3)
         .opacity((f?.reachable ?? true) ? 1 : 0.65)
     }
 }

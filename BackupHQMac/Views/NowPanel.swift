@@ -1,136 +1,190 @@
 import SwiftUI
 import BackupHQCore
 
-/// The one panel that answers "what is it doing?". Every slot has a fixed size, so the panel never changes
-/// height or shuffles as work starts and stops: empty slots stay empty rather than disappearing.
+/// The one panel that answers "what is it doing?". Fixed geometry, and every slot holds something worth reading
+/// in every state: four tiles that always have numbers, and a five-row list that shows live jobs while busy and
+/// the most recent activity while idle.
 struct NowPanel: View {
     @Environment(AppModel.self) private var model
     var compact = false
-
-    private static let queueKinds: [(kind: String, icon: String, label: String)] = [
-        ("scan", "folder", "folders to look through"),
-        ("hash", "number", "files to fingerprint"),
-        ("backup", "externaldrive", "files to copy to disk"),
-        ("upload", "icloud.and.arrow.up", "files to upload to S3"),
-        ("verify", "checkmark.shield", "copies to re-check"),
-    ]
-    private let runningRows = 5
+    private let rows = 5
+    private let rowHeight: CGFloat = 20
 
     var body: some View {
         let s = model.stats
         VStack(alignment: .leading, spacing: 10) {
             header(s)
-            if !compact {
-                HStack(alignment: .top, spacing: 18) {
-                    queueColumn(s).frame(width: 340)
-                    Divider().frame(height: CGFloat(runningRows) * 22 + 22)
-                    runningColumn(s)
+            if compact {
+                Text(compactSummary(s)).font(.callout).foregroundStyle(.secondary).lineLimit(1).frame(height: 20)
+            } else {
+                HStack(spacing: 10) {
+                    tileWatching(s)
+                    tileQueue(s)
+                    tileRecent(s)
+                    tilePlaces(s)
                 }
+                .frame(height: 62)
+                listArea(s)
             }
-            footer(s)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(height: compact ? 92 : 236)
-        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(s.engineRunning ? Color.green.opacity(0.35) : (s.jobsPending > 0 ? Color.orange.opacity(0.5) : Color.clear), lineWidth: 1.5))
+        .frame(height: compact ? 86 : 28 + 10 + 62 + 10 + 18 + CGFloat(rows) * rowHeight + 28)
+        .card()
+        // The engine's state is a coloured accent down the left edge, not a border all the way round.
+        .overlay(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 2).fill(s.engineRunning ? Color.green : (s.jobsPending > 0 ? Color.orange : Color.secondary.opacity(0.4)))
+                .frame(width: 4).padding(.vertical, 12).padding(.leading, 0)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
-    // MARK: Pieces
+    // MARK: Header
 
     private func header(_ s: CatalogStats) -> some View {
         HStack(spacing: 10) {
-            Circle().fill(s.engineRunning ? Color.green : (s.jobsPending > 0 ? Color.orange : Color.secondary)).frame(width: 10, height: 10)
-            Text(headline(s)).font(.title3).bold().lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+            Text(headline(s)).font(.headline).lineLimit(1)
+            if s.jobsFailed > 0 {
+                Button { Task { await model.retryFailed() } } label: { Label("\(s.jobsFailed) failed · retry", systemImage: "xmark.octagon") }
+                    .buttonStyle(.plain).foregroundStyle(.red).font(.callout)
+            }
+            Spacer()
             Text(s.engineRunning && s.throughputBytesPerSecond > 0 ? "\(Format.bytes(Int64(s.throughputBytesPerSecond)))/s" : " ")
                 .monospacedDigit().foregroundStyle(.secondary).frame(width: 96, alignment: .trailing)
-            Button(s.engineRunning ? "Pause" : "Start") { Task { await model.toggleEngine() } }
-                .buttonStyle(.borderedProminent).tint(s.engineRunning ? .orange : .green)
-                .disabled(!s.engineRunning && s.jobsPending == 0)
-                .frame(width: 76)
+            // Start is the one action that matters when work is waiting, so only then does it get a filled button.
+            Group {
+                if s.engineRunning { Button("Pause") { Task { await model.toggleEngine() } }.buttonStyle(.bordered) }
+                else { Button("Start") { Task { await model.toggleEngine() } }.buttonStyle(.borderedProminent).tint(.green).disabled(s.jobsPending == 0) }
+            }
+            .frame(width: 76)
         }
         .frame(height: 28)
     }
 
-    /// Five fixed rows, one per kind of work; a kind with nothing queued shows a dash rather than vanishing.
-    private func queueColumn(_ s: CatalogStats) -> some View {
-        var byKind: [String: (count: Int, bytes: Int64, targets: [String])] = [:]
-        for q in s.queue {
-            var e = byKind[q.kind] ?? (0, 0, [])
-            e.count += q.count; e.bytes += q.bytes
-            if let t = q.targetName, !e.targets.contains(t) { e.targets.append(t) }
-            byKind[q.kind] = e
-        }
-        let other = s.queue.filter { q in !Self.queueKinds.contains { $0.kind == q.kind } }.reduce((0, Int64(0))) { ($0.0 + $1.count, $0.1 + $1.bytes) }
-        return VStack(alignment: .leading, spacing: 2) {
-            Text("Queue").font(.caption).foregroundStyle(.secondary).frame(height: 18)
-            ForEach(Self.queueKinds, id: \.kind) { k in
-                let e = byKind[k.kind]
-                HStack(spacing: 8) {
-                    Image(systemName: k.icon).frame(width: 16).foregroundStyle(e == nil ? .quaternary : .secondary)
-                    Text(e.map { Format.count($0.count) } ?? "—").monospacedDigit().frame(width: 58, alignment: .trailing).foregroundStyle(e == nil ? .tertiary : .primary)
-                    Text(k.label).font(.callout).foregroundStyle(e == nil ? .tertiary : .primary).lineLimit(1)
-                    Spacer(minLength: 0)
-                    Text(e.map { $0.bytes > 0 ? Format.bytes($0.bytes) : " " } ?? " ").font(.caption).monospacedDigit().foregroundStyle(.secondary).frame(width: 70, alignment: .trailing)
-                }
-                .frame(height: 22)
-                .help(e.map { $0.targets.isEmpty ? "" : "to " + $0.targets.joined(separator: ", ") } ?? "")
+    // MARK: Tiles
+
+    private func tile(_ title: String, _ big: String, _ small: String, icon: String, tint: Color = .secondary) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: icon).foregroundStyle(tint).frame(width: 18).padding(.top, 2)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Text(big).font(.callout).bold().monospacedDigit().lineLimit(1)
+                Text(small).font(.caption).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
             }
-            HStack {
-                Text(other.0 > 0 ? "+ \(Format.count(other.0)) other tasks" : " ").font(.caption2).foregroundStyle(.tertiary)
-                Spacer()
-                Text(eta(s).map { "about \($0) left" } ?? " ").font(.caption).monospacedDigit().foregroundStyle(.secondary)
-            }
-            .frame(height: 18)
+            Spacer(minLength: 0)
         }
+        .padding(8)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(.background, in: RoundedRectangle(cornerRadius: 8))
     }
 
-    /// The same number of rows every time; rows without a job are blank.
-    private func runningColumn(_ s: CatalogStats) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text("Working on").font(.caption).foregroundStyle(.secondary).frame(height: 18)
-            ForEach(0..<runningRows, id: \.self) { i in
-                let j: RunningJob? = i < s.running.count ? s.running[i] : nil
-                HStack(spacing: 8) {
-                    Image(systemName: j.map { icon($0.kind) } ?? "circle").frame(width: 16).foregroundStyle(j == nil ? Color.clear : Color.accentColor)
-                    Text(j.map { verb($0.kind) } ?? " ").font(.caption).foregroundStyle(.secondary).frame(width: 64, alignment: .leading)
-                    Text(j?.name ?? " ").lineLimit(1).truncationMode(.middle).frame(maxWidth: .infinity, alignment: .leading)
-                    Text(j?.targetName.map { "→ \($0)" } ?? " ").font(.caption).foregroundStyle(.secondary).lineLimit(1).frame(width: 110, alignment: .leading)
-                    ProgressView(value: j.map { $0.bytesTotal > 0 ? min(1, Double($0.bytesDone) / Double($0.bytesTotal)) : 0 } ?? 0)
-                        .frame(width: 100).opacity(j == nil ? 0 : 1)
-                    Text(j.map { $0.bytesTotal > 0 ? Format.bytes($0.bytesTotal) : " " } ?? " ").font(.caption).monospacedDigit().foregroundStyle(.secondary).frame(width: 64, alignment: .trailing)
-                }
-                .frame(height: 22)
+    private func tileWatching(_ s: CatalogStats) -> some View {
+        let folders = s.folders
+        let bytes = folders.reduce(0) { $0 + $1.bytes }
+        let files = folders.reduce(0) { $0 + $1.fileCount }
+        let last = folders.compactMap(\.lastScanned).max()
+        let every = model.settings.scanEveryMinutes
+        var small = last.map { "last look \($0.formatted(.relative(presentation: .named)))" } ?? "not looked at yet"
+        if let last, every > 0 {
+            let next = last.addingTimeInterval(Double(every) * 60)
+            small += next > Date() ? " · next \(next.formatted(.relative(presentation: .named)))" : " · next look due"
+        }
+        if model.settings.watchFolders && s.engineRunning { small += " · live" }
+        return tile("Watching", "\(folders.count) folder\(folders.count == 1 ? "" : "s") · \(Format.bytes(bytes))", "\(Format.count(files)) files · " + small, icon: "eye", tint: .green)
+    }
+
+    private func tileQueue(_ s: CatalogStats) -> some View {
+        let count = s.queue.reduce(0) { $0 + $1.count }
+        let bytes = s.queue.reduce(Int64(0)) { $0 + $1.bytes }
+        let big = count == 0 ? "Queue empty" : "\(Format.count(count)) task\(count == 1 ? "" : "s") · \(Format.bytes(bytes))"
+        var small: String
+        if count == 0 { small = s.engineRunning ? "watching for changes" : (s.jobsPending > 0 ? "paused" : "nothing waiting") }
+        else {
+            let parts = Self.kindOrder.compactMap { k -> String? in
+                let n = s.queue.filter { $0.kind == k }.reduce(0) { $0 + $1.count }
+                return n > 0 ? "\(Format.count(n)) \(Self.shortLabel(k))" : nil
             }
-            Text(s.running.count > runningRows ? "+ \(s.running.count - runningRows) more" : (s.jobsRunning > 0 ? "\(s.jobsRunning) running" : " "))
+            small = parts.joined(separator: " · ")
+            if let e = eta(s) { small = "about \(e) left · " + small }
+        }
+        return tile("Queue", big, small, icon: "tray.full", tint: count > 0 ? .orange : .secondary)
+    }
+
+    private func tileRecent(_ s: CatalogStats) -> some View {
+        let by = Dictionary(uniqueKeysWithValues: s.recentWork.map { ($0.kind, $0) })
+        let moved = (by["backup"]?.bytes ?? 0) + (by["upload"]?.bytes ?? 0) + (by["import"]?.bytes ?? 0)
+        let parts = ["hash", "backup", "upload", "verify", "scan"].compactMap { k -> String? in
+            guard let r = by[k], r.count > 0 else { return nil }
+            return "\(Format.count(r.count)) \(Self.pastLabel(k))"
+        }
+        let big = moved > 0 ? "\(Format.bytes(moved)) moved" : (parts.isEmpty ? "Nothing yet" : "\(Format.count(s.recentWork.reduce(0) { $0 + $1.count })) tasks")
+        return tile("Last 24 hours", big, parts.isEmpty ? "no work finished" : parts.joined(separator: " · "), icon: "clock.arrow.circlepath", tint: .blue)
+    }
+
+    private func tilePlaces(_ s: CatalogStats) -> some View {
+        // Only the places copies go to: backup disks and archives, not the tracked folders themselves.
+        let disks = s.places.filter { $0.role == "mirror" || $0.role == "library" }
+        let s3 = s.places.filter { $0.role == "archive" }
+        let diskBits = disks.map { p -> String in
+            p.reachable ? "\(p.name) \(p.freeBytes.map { Format.bytes($0) + " free" } ?? Format.bytes(p.verifiedBytes))" : "\(p.name) not plugged in"
+        }
+        let s3Bits = s3.map { p -> String in
+            let usd = p.monthlyUSD
+            return "\(p.name) \(Format.bytes(p.verifiedBytes))" + (usd >= 0.005 ? String(format: " · $%.2f/mo", usd) : "")
+        }
+        let all = diskBits + s3Bits
+        let big = all.first ?? "No places yet"
+        let rest = all.dropFirst().joined(separator: " · ")
+        return tile("Places", big, rest.isEmpty ? "\(s.places.count) place\(s.places.count == 1 ? "" : "s")" : rest, icon: "externaldrive.badge.icloud", tint: .accentColor)
+    }
+
+    // MARK: The five-row list
+
+    private func listArea(_ s: CatalogStats) -> some View {
+        let live = !s.running.isEmpty
+        return VStack(alignment: .leading, spacing: 2) {
+            Text(live ? "Working on" : "Recently").font(.caption).foregroundStyle(.secondary).frame(height: 18)
+            ForEach(0..<rows, id: \.self) { i in
+                if live { runningRow(i < s.running.count ? s.running[i] : nil) }
+                else { eventRow(i < s.recentEvents.count ? s.recentEvents[i] : nil) }
+            }
+            Text(live ? (s.running.count > rows ? "+ \(s.running.count - rows) more" : "\(s.jobsRunning) running") : " ")
                 .font(.caption2).foregroundStyle(.tertiary).frame(height: 18)
         }
     }
 
-    /// One line, always present: the failure count, the paused note, or what idle means.
-    private func footer(_ s: CatalogStats) -> some View {
+    private func runningRow(_ j: RunningJob?) -> some View {
         HStack(spacing: 8) {
-            if s.jobsFailed > 0 {
-                Label("\(s.jobsFailed) failed — see Activity for the reason", systemImage: "xmark.octagon").foregroundStyle(.red)
-                Spacer()
-                Button("Retry") { Task { await model.retryFailed() } }.controlSize(.small)
-            } else if !s.engineRunning && s.jobsPending > 0 {
-                Label("Nothing is happening until you press Start. The work is saved and carries on from where it stopped.", systemImage: "pause.circle").foregroundStyle(.orange)
-            } else if s.engineRunning && s.queue.isEmpty && s.running.isEmpty {
-                Label("Queue is empty. Watching your folders and re-checking old copies in the background.", systemImage: "eye").foregroundStyle(.secondary)
-            } else if !s.engineRunning {
-                Label("Everything you asked for is done.", systemImage: "checkmark").foregroundStyle(.secondary)
-            } else if compact {
-                Text(compactSummary(s)).foregroundStyle(.secondary).lineLimit(1)
-            } else {
-                Text(" ")
-            }
+            Image(systemName: j.map { icon($0.kind) } ?? "circle").frame(width: 16).foregroundStyle(j == nil ? Color.clear : Color.accentColor)
+            Text(j.map { verb($0.kind) } ?? " ").font(.caption).foregroundStyle(.secondary).frame(width: 64, alignment: .leading)
+            Text(j?.name ?? " ").lineLimit(1).truncationMode(.middle).frame(maxWidth: .infinity, alignment: .leading)
+            Text(j?.targetName.map { "→ \($0)" } ?? " ").font(.caption).foregroundStyle(.secondary).lineLimit(1).frame(width: 110, alignment: .leading)
+            ProgressView(value: j.map { $0.bytesTotal > 0 ? min(1, Double($0.bytesDone) / Double($0.bytesTotal)) : 0 } ?? 0)
+                .frame(width: 100).opacity(j == nil ? 0 : 1)
+            Text(j.map { $0.bytesTotal > 0 ? Format.bytes($0.bytesTotal) : " " } ?? " ").font(.caption).monospacedDigit().foregroundStyle(.secondary).frame(width: 64, alignment: .trailing)
         }
-        .font(.callout)
-        .frame(height: 20)
+        .frame(height: rowHeight)
+    }
+
+    private func eventRow(_ e: CatalogStats.RecentEvent?) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: e.map { $0.level == "error" ? "xmark.octagon.fill" : ($0.level == "warning" ? "exclamationmark.triangle.fill" : ($0.level == "notice" ? "info.circle" : "checkmark.circle")) } ?? "circle")
+                .frame(width: 16).foregroundStyle(e.map { $0.level == "error" ? Color.red : ($0.level == "warning" ? .orange : .secondary) } ?? .clear)
+            Text(e.map { $0.time.formatted(date: .omitted, time: .shortened) } ?? " ").font(.caption).monospacedDigit().foregroundStyle(.secondary).frame(width: 64, alignment: .leading)
+            Text(e?.message ?? " ").font(.callout).lineLimit(1).truncationMode(.tail).frame(maxWidth: .infinity, alignment: .leading).help(e?.message ?? "")
+        }
+        .frame(height: rowHeight)
     }
 
     // MARK: Words
+
+    private static let kindOrder = ["scan", "hash", "backup", "upload", "verify", "import", "reclass"]
+    private static func shortLabel(_ k: String) -> String {
+        switch k { case "scan": return "to look through"; case "hash": return "to fingerprint"; case "backup": return "to copy"; case "upload": return "to upload"; case "verify": return "to re-check"; case "import": return "to import"; case "reclass": return "to re-class"; default: return k }
+    }
+    private static func pastLabel(_ k: String) -> String {
+        switch k { case "scan": return "looks"; case "hash": return "fingerprinted"; case "backup": return "copied"; case "upload": return "uploaded"; case "verify": return "re-checked"; case "import": return "imported"; default: return k }
+    }
 
     private func headline(_ s: CatalogStats) -> String {
         if s.engineRunning {
@@ -149,11 +203,15 @@ struct NowPanel: View {
     }
 
     private func compactSummary(_ s: CatalogStats) -> String {
-        let parts = Self.queueKinds.compactMap { k -> String? in
-            let n = s.queue.filter { $0.kind == k.kind }.reduce(0) { $0 + $1.count }
-            return n > 0 ? "\(Format.count(n)) \(k.label)" : nil
+        if s.jobsFailed > 0 { return "\(s.jobsFailed) failed — see Activity" }
+        if !s.engineRunning && s.jobsPending > 0 { return "Paused. The work is saved and carries on from where it stopped when you press Start." }
+        let count = s.queue.reduce(0) { $0 + $1.count }
+        if count == 0 { return s.engineRunning ? "Queue is empty. Watching your folders and re-checking old copies in the background." : "Everything you asked for is done." }
+        let parts = Self.kindOrder.compactMap { k -> String? in
+            let n = s.queue.filter { $0.kind == k }.reduce(0) { $0 + $1.count }
+            return n > 0 ? "\(Format.count(n)) \(Self.shortLabel(k))" : nil
         }
-        var line = parts.isEmpty ? "Working" : parts.joined(separator: " · ")
+        var line = parts.joined(separator: " · ")
         if let e = eta(s) { line += " · about \(e) left" }
         return line
     }
